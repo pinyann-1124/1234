@@ -25,13 +25,3 @@
 * **資料庫 (Database)：** SQLite3 (本地實體檔案資料庫 `health.db`)
 * **外部 API (External API)：** Google Gemini API (`axios`)
 
----
-
-## 🚀 快速啟動 (Getting Started)
-
-### 1. 取得專案與安裝依賴
-請將專案 clone 到本地端，並安裝必要的 Node.js 套件：
-```bash
-git clone [https://github.com/pinyann-1124/1234.git](https://github.com/pinyann-1124/1234.git)
-cd 1234
-npm install
