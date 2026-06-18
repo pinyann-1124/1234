@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智慧健康日誌與風險評估系統</title>
+    <style>
+        body { font-family: "微軟正黑體", sans-serif; background-color: #f4f7f6; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1, h2 { color: #2c3e50; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+        .btn-group { display: flex; gap: 10px; margin-top: 15px; }
+        button { background-color: #3498db; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; font-size: 16px; flex: 1; transition: 0.3s; }
+        button:hover { background-color: #2980b9; }
+        /* 新增：當按鈕被禁用時的樣式 */
+        button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
+        .btn-secondary { background-color: #95a5a6; }
+        .btn-secondary:hover { background-color: #7f8c8d; }
+        .btn-danger { background-color: #e74c3c; padding: 5px 10px; font-size: 14px; }
+        .btn-danger:hover { background-color: #c0392b; }
+        .btn-edit { background-color: #f39c12; padding: 5px 10px; font-size: 14px; margin-right: 5px; }
+        .btn-edit:hover { background-color: #d68910; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: center; }
+        th { background-color: #2c3e50; color: white; }
+        .error-box { display: none; background-color: #ffdddd; color: #d8000c; border-left: 6px solid #d8000c; padding: 15px; margin-bottom: 20px; border-radius: 4px; font-weight: bold; white-space: pre-wrap; }
+        .status-text { text-align: center; color: #27ae60; font-weight: bold; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1 id="formTitle">新增健康日誌</h1>
+    <div id="errorBox" class="error-box"></div>
+    <div id="statusText" class="status-text"></div>
+
+    <input type="hidden" id="editId">
+
+    <div class="form-group">
+        <label>紀錄日期 (YYYY-MM-DD)</label>
+        <input type="date" id="logDate" required>
+    </div>
+    <div class="form-group">
+        <label>睡眠時數</label>
+        <input type="number" id="sleepHours" step="0.1" required>
+    </div>
+    <div class="form-group">
+        <label>當日步數</label>
+        <input type="number" id="steps" required>
+    </div>
+    <div class="form-group">
+        <label>心情分數 (1~10)</label>
+        <input type="number" id="moodScore" min="1" max="10" required>
+    </div>
+    
+    <div class="btn-group">
+        <button id="btnSubmit" onclick="saveData()">AI 評估並儲存</button>
+        <button id="btnRiskOnly" class="btn-secondary" onclick="calculateRiskOnly()">僅計算風險 (不存檔)</button>
+        <button id="btnCancelEdit" class="btn-secondary" style="display:none;" onclick="cancelEdit()">取消編輯</button>
+    </div>
+
+    <h2>歷史紀錄</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>日期</th>
+                <th>睡眠</th>
+                <th>步數</th>
+                <th>心情</th>
+                <th>風險等級</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody id="logsTableBody"></tbody>
+    </table>
+</div>
+
+<script>
+    document.getElementById('logDate').valueAsDate = new Date();
+
+    async function fetchLogs() {
+        try {
+            const response = await fetch('/health-logs');
+            const result = await response.json();
+            if (result.success) {
+                const tbody = document.getElementById('logsTableBody');
+                tbody.innerHTML = '';
+                result.data.forEach(log => {
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${log.log_date}</td>
+                            <td>${log.sleep_hours}</td>
+                            <td>${log.steps}</td>
+                            <td>${log.mood_score}</td>
+                            <td style="font-weight:bold; color: ${log.risk_level === '高' ? 'red' : log.risk_level === '低' ? 'green' : 'orange'}">${log.risk_level}</td>
+                            <td>
+                                <button class="btn-edit" onclick='startEdit(${JSON.stringify(log)})'>編輯</button>
+                                <button class="btn-danger" onclick="deleteLog(${log.id})">刪除</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            }
+        } catch (error) { console.error("無法載入紀錄", error); }
+    }
+
+    // ✨ 新增功能：控制按鈕狀態與載入文字
+    function setProcessingState(isProcessing) {
+        document.getElementById('btnSubmit').disabled = isProcessing;
+        document.getElementById('btnRiskOnly').disabled = isProcessing;
+        document.getElementById('errorBox').style.display = 'none'; // 每次發送前必定隱藏舊錯誤
+        
+        if (isProcessing) {
+            document.getElementById('statusText').style.color = '#f39c12';
+            document.getElementById('statusText').innerText = '⏳ AI 正在努力分析中，請稍候...';
+        } else {
+            document.getElementById('statusText').innerText = '';
+            document.getElementById('statusText').style.color = '#27ae60';
+        }
+    }
+
+    function handleResponseError(result) {
+        const errorBox = document.getElementById('errorBox');
+        if (result.isQuotaError) {
+            errorBox.innerText = result.message;
+            errorBox.style.display = 'block';
+        } else {
+            alert("發生錯誤：" + result.message);
+        }
+    }
+
+    function getFormData() {
+        return {
+            log_date: document.getElementById('logDate').value,
+            sleep_hours: parseFloat(document.getElementById('sleepHours').value),
+            steps: parseInt(document.getElementById('steps').value),
+            mood_score: parseInt(document.getElementById('moodScore').value)
+        };
+    }
+
+    async function saveData() {
+        const data = getFormData();
+        const editId = document.getElementById('editId').value;
+
+        if (!data.log_date || isNaN(data.sleep_hours) || isNaN(data.steps) || isNaN(data.mood_score)) {
+            return alert("請完整填寫所有欄位！");
+        }
+
+        // ✨ 鎖定按鈕，防止連點
+        setProcessingState(true);
+
+        const method = editId ? 'PUT' : 'POST';
+        const url = editId ? `/health-logs/${editId}` : '/health-logs';
+
+        try {
+            const response = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+
+            // ✨ 解開按鈕鎖定
+            setProcessingState(false);
+
+            if (!response.ok) return handleResponseError(result); // 如果是真的失敗，才會跳出紅框
+
+            alert(result.message + `\nAI 判定風險等級為：${result.data.risk_level}`);
+            cancelEdit();
+            fetchLogs();
+        } catch (error) { 
+            setProcessingState(false);
+            alert("連線失敗，請確認伺服器已啟動。"); 
+        }
+    }
+
+    async function deleteLog(id) {
+        if (!confirm("確定要刪除這筆紀錄嗎？")) return;
+        try {
+            const response = await fetch(`/health-logs/${id}`, { method: 'DELETE' });
+            const result = await response.json();
+            if (result.success) fetchLogs();
+        } catch (error) { alert("刪除失敗"); }
+    }
+
+    async function calculateRiskOnly() {
+        const data = getFormData();
+        
+        if (!data.log_date || isNaN(data.sleep_hours) || isNaN(data.steps) || isNaN(data.mood_score)) {
+            return alert("請完整填寫所有欄位！");
+        }
+
+        // ✨ 鎖定按鈕，防止連點
+        setProcessingState(true);
+
+        try {
+            const url = `/health-logs/risk?sleep_hours=${data.sleep_hours}&steps=${data.steps}&mood_score=${data.mood_score}`;
+            const response = await fetch(url);
+            const result = await response.json();
+
+            // ✨ 解開按鈕鎖定
+            setProcessingState(false);
+
+            if (!response.ok) return handleResponseError(result);
+
+            document.getElementById('statusText').style.color = '#27ae60';
+            document.getElementById('statusText').innerText = `✅ 單純評估結果：目前的數據風險等級為「${result.data.risk_level}」`;
+        } catch (error) { 
+            setProcessingState(false);
+            alert("連線失敗"); 
+        }
+    }
+
+    function startEdit(log) {
+        document.getElementById('formTitle').innerText = "編輯健康日誌 (AI 將重新評估)";
+        document.getElementById('editId').value = log.id;
+        document.getElementById('logDate').value = log.log_date;
+        document.getElementById('sleepHours').value = log.sleep_hours;
+        document.getElementById('steps').value = log.steps;
+        document.getElementById('moodScore').value = log.mood_score;
+        
+        document.getElementById('btnSubmit').innerText = "更新並儲存";
+        document.getElementById('btnCancelEdit').style.display = "inline-block";
+        document.getElementById('btnRiskOnly').style.display = "none";
+        window.scrollTo(0, 0);
+    }
+
+    function cancelEdit() {
+        document.getElementById('formTitle').innerText = "新增健康日誌";
+        document.getElementById('editId').value = "";
+        document.getElementById('sleepHours').value = "";
+        document.getElementById('steps').value = "";
+        document.getElementById('moodScore').value = "";
+        document.getElementById('statusText').innerText = "";
+        
+        document.getElementById('btnSubmit').innerText = "AI 評估並儲存";
+        document.getElementById('btnCancelEdit').style.display = "none";
+        document.getElementById('btnRiskOnly').style.display = "inline-block";
+    }
+
+    fetchLogs();
+</script>
+</body>
+</html>
